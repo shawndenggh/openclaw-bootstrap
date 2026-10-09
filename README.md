@@ -9,18 +9,33 @@
 - 需要 **Bash**，请使用 `bash` 执行，不要用 `sh`
 - 仅支持 **Ubuntu**
 - 仅支持 `x86_64` 与 `aarch64`
-- 仅负责安装 OpenClaw，并可选启动一次 `openclaw onboard`
+- 负责确保 **Docker Engine** 与 **Docker Compose v2** 可用，安装 OpenClaw，并可选启动一次 `openclaw onboard`
 
 如果系统里已经存在 `openclaw`，脚本会直接跳过安装，**不会升级，也不会覆盖现有配置**。但显式指定 `--onboard` 时仍会运行 `openclaw onboard`，该向导可能有意修改配置，上述“跳过安装”的承诺不适用于这个显式请求的向导。
 
 未指定 `--onboard` 时，脚本结束前会提示后续步骤：先运行 `openclaw onboard`，再运行 `openclaw gateway install`（已安装与全新安装两种情况均适用）。
+
+## Docker / Compose 自动安装
+
+脚本默认**先**确保 Docker 与 Compose v2 可用，再处理 OpenClaw，因此即使 `openclaw` 已存在，重新运行也会补装缺失的 Docker。
+
+- Compose 指 v2 插件，命令为 `docker compose`（**不是**旧版 `docker-compose`）。
+- `docker --version` 与 `docker compose version` 都正常：不安装任何 Docker 软件包，不改动服务，也不需要 sudo。
+- 已有 Docker 但缺少 Compose v2：仅安装兼容的 Compose 软件包（优先 `docker-compose-plugin`，其次 `docker-compose-v2`，都没有时使用 Docker 官方 Ubuntu apt 源）。安装前会用 `apt-get -s` 模拟，若会移除软件包或触及已有 Docker/containerd/runc 等引擎核心包则拒绝。**现有引擎保持不变**，不会被重装、升级或重启。
+- 完全没有 Docker：使用官方源 `https://download.docker.com/linux/ubuntu`（密钥经 HTTPS 下载，apt `signed-by` 方式校验）安装 `docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin`。已存在官方源则复用；否则写入 `/etc/apt/sources.list.d/openclaw-bootstrap-docker.sources` 与 `/etc/apt/keyrings/openclaw-bootstrap-docker.asc`，不会覆盖未知的同名文件。
+- 全新安装后，若 systemd 正在运行则执行 `systemctl enable --now docker`；否则脚本会提示服务未自动启动，需自行启动。
+- 若检测到 `docker.io`、`docker-compose`、`docker-compose-v2`、`docker-doc`、`docker-buildx`、`podman-docker`、`containerd`、`runc` 等冲突软件包、残留的部分 Docker CE 软件包、无法运行的 `docker` 命令或 Podman 兼容层，脚本会给出中文提示并退出，**不会卸载或替换**。
+- 不会删除任何数据，不执行 autoremove/prune，不下载 hello-world 测试镜像。
+- 不会自动把用户加入 `docker` 组，不修改 `daemon.json`，也不手动改防火墙；Docker 自身会管理其网络规则。初始登录用户可能需要使用 `sudo docker`，或自行配置访问权限，才能让沙箱使用 Docker。
+- 需要 root 或免密 `sudo -n` 才会写入 apt 配置或安装软件包；无法提权时请先运行 `sudo -v` 后重试。
 
 ## 安装与后续配置的区别
 
 这个脚本的职责是：
 
 - 检查 Ubuntu / 架构
-- 在缺少时安装安装器所需依赖：`ca-certificates`、`curl`、`git`
+- 在缺少时安装所需依赖：`ca-certificates`、`curl`、`git`
+- 确保 Docker Engine 与 Docker Compose v2（见上文）
 - 下载并执行 OpenClaw 官方安装器
 - 可选执行 `openclaw onboard`
 
@@ -102,7 +117,7 @@ openclaw onboard
 
 ## 依赖与实现说明
 
-脚本只会在缺少依赖时才请求 `root` 或 `sudo` 权限。
+脚本只会在需要安装依赖、Docker 或 Compose 时才请求 `root` 或 `sudo` 权限；全部已就绪时不会提权。
 
 它会检查并按需安装：
 
@@ -123,6 +138,14 @@ https://openclaw.ai/install.sh
 ```
 
 兼容的 Node.js 处理由 **官方安装器** 负责，这个仓库里的脚本 **不会硬编码 Node 版本**。
+
+## 测试
+
+`tests/test-install.sh` 使用完全模拟的命令验证 Docker/Compose 逻辑，不会执行真实安装：
+
+```bash
+bash tests/test-install.sh
+```
 
 ## 帮助
 
